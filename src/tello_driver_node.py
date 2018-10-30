@@ -2,7 +2,7 @@
 import rospy
 from std_msgs.msg import Empty, UInt8, Bool
 from std_msgs.msg import UInt8MultiArray
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from dynamic_reconfigure.server import Server
@@ -67,6 +67,8 @@ class TelloNode(tello.Tello):
             rospy.get_param('~connect_timeout_sec', 10.0))
         self.stream_h264_video = bool(
             rospy.get_param('~stream_h264_video', False))
+        self.h264_use_compressed_image = bool(
+            rospy.get_param('~h264_use_compressed_image', False))
         self.bridge = CvBridge()
         self.frame_thread = None
 
@@ -100,8 +102,12 @@ class TelloNode(tello.Tello):
         self.pub_status = rospy.Publisher(
             'status', TelloStatus, queue_size=1, latch=True)
         if self.stream_h264_video:
-            self.pub_image_h264 = rospy.Publisher(
-                'image_raw/h264', H264Packet, queue_size=10)
+            if self.h264_use_compressed_image:
+                self.pub_image_h264_compressed = rospy.Publisher(
+                    'image_raw/h264', CompressedImage, queue_size=10)
+            else:
+                self.pub_image_h264 = rospy.Publisher(
+                    'image_raw/h264', H264Packet, queue_size=10)
         else:
             self.pub_image_raw = rospy.Publisher(
                 'image_raw', Image, queue_size=10)
@@ -200,12 +206,21 @@ class TelloNode(tello.Tello):
 
     def cb_h264_frame(self, event, sender, data, **args):
         frame, seq_id, frame_secs = data
-        pkt_msg = H264Packet()
-        pkt_msg.header.seq = seq_id
-        pkt_msg.header.frame_id = rospy.get_namespace()
-        pkt_msg.header.stamp = rospy.Time.from_sec(frame_secs)
-        pkt_msg.data = frame
-        self.pub_image_h264.publish(pkt_msg)
+        if self.h264_use_compressed_image:
+            pkt_msg = CompressedImage()
+            pkt_msg.header.seq = seq_id
+            pkt_msg.header.frame_id = rospy.get_namespace()
+            pkt_msg.header.stamp = rospy.Time.from_sec(frame_secs)
+            pkt_msg.data = frame
+            pkt_msg.format = 'h264'
+            self.pub_image_h264_compressed.publish(pkt_msg)
+        else:
+            pkt_msg = H264Packet()
+            pkt_msg.header.seq = seq_id
+            pkt_msg.header.frame_id = rospy.get_namespace()
+            pkt_msg.header.stamp = rospy.Time.from_sec(frame_secs)
+            pkt_msg.data = frame
+            self.pub_image_h264.publish(pkt_msg)
 
     def framegrabber_loop(self):
         # Repeatedly try to connect
